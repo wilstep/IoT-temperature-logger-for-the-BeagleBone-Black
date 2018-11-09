@@ -10,8 +10,8 @@
 #include <signal.h>
 #include <pthread.h>
 #include <time.h>
-#include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/types.h> 
 #include <sys/socket.h>
@@ -21,6 +21,7 @@
 // kill child
 // killpg(pid, SIGKILL);
 
+static void *shmem;
 static char *run_flg;
 static int *delay_time;
 char dbfn[] = "temperature.db";
@@ -31,40 +32,39 @@ int main(int argc, char *argv[])
     int n;
     char ch_flg;
     char buffer[256];
-    static void *shmem;
     socklen_t clilen;
     struct sockaddr_in serv_addr, cli_addr;
 
     if(argc < 2) {
-        fprintf(stderr,"ERROR, no port provided\n");
+        fprintf(stderr,"Error: no port provided\n");
         exit(1);
     }
     signal(SIGCHLD,SIG_IGN); // stop accumulation of zombie processes
     if(access(dbfn, F_OK) == -1) db_create(); // create database if it doesn't exist
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if(sockfd < 0) 
-    error("ERROR opening socket");
+    error("Error: opening socket");
     bzero((char *) &serv_addr, sizeof(serv_addr));
     portno = atoi(argv[1]);
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
     serv_addr.sin_port = htons(portno);
     if(bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
-        error("ERROR on binding");
+        error("Error: on binding");
     listen(sockfd,5);
     clilen = sizeof(cli_addr);
     shmem = create_shared_memory(sizeof(char) + sizeof(int)); // pointer to shared memory
-    run_flg = shmem;
+    run_flg = shmem; 
     *run_flg = 0; // denotes that temperature logging is off
-    delay_time = shmem + sizeof(int);
+    delay_time = shmem + sizeof(char);
     *delay_time = 1;
     while(1){
         newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
-        if(newsockfd < 0) error("ERROR on accept");
+        if(newsockfd < 0) error("Error: on accept");
         n = read(newsockfd, &ch_flg, 1); // read first byte of clients message, which is a flag
-        if (n != 1) error("ERROR reading from socket");
+        if (n != 1) error("Error: reading from socket");
         pid = fork();
-        if(pid < 0) error("ERROR on fork");
+        if(pid < 0) error("Error: on fork");
         if(pid == 0){ // Child process
             close(sockfd); // copy of file descriptor, doesn't close parent's
             switch(ch_flg){
@@ -76,6 +76,7 @@ int main(int argc, char *argv[])
                     else{
                         sock_talk(newsockfd, "Temperature monitoring started", buffer);
                         close(newsockfd);
+                        sleep(2); // give 2 seconds for closing of previous start_temp...(), just in case
                         start_temperature_reading();  
                     }                
                     break;
@@ -94,14 +95,15 @@ int main(int argc, char *argv[])
                     *delay_time = atoi(buffer);
                     sprintf(buffer, "delay time set to %d", *delay_time);
                     n = write(newsockfd, buffer, strlen(buffer));
-                    if (n < 0) error("ERROR writing to socket");
+                    if (n < 0) error("Error: writing to socket");
                     close(newsockfd);
                     break; 
-                case 'e': // basic talk example
-                    sock_talk(newsockfd, "Hello hello, how low", buffer);
-                    printf("Here is the message: %s", buffer);
-                    close(newsockfd);
-                    break;    
+                case 'e': // shutdown
+                    *run_flg = 0;
+                    sock_talk(newsockfd, "Server is shutting down", buffer);
+                    printf("Shutting down\n");
+                    close(newsockfd); 
+                    break;
                 default:
                     fprintf(stderr, "Error: invalid flag passed from client\n");     
                     sock_talk(newsockfd, "Error: invalid flag passed from client", buffer);
@@ -111,11 +113,13 @@ int main(int argc, char *argv[])
         }
         else{ // parent process
             close(newsockfd);
+            if(ch_flg == 'e'){
+                close(sockfd);
+                return 0;
+            }
         }
      } /* end of while */
-     /* we never get here */
-     close(sockfd);
-     return 0; 
+     /* we never get here */ 
 }
 
 void error(const char *msg)
@@ -131,40 +135,35 @@ void error(const char *msg)
  the results in the database. Handles required
  socket communication
  *****************************************/
-void start_temperature_reading(void)
+void start_temperature_reading()
 {
-    int pid;
     char buff[256];
     double T;
     time_t t = 0;
     struct tm *now;
       
-    *run_flg = 1;
     // now fork off proccess
-    pid = fork();
-    if(pid < 0) error("ERROR on fork");
-    if(pid == 0){ // Child process
-        while(*run_flg){
-            delay();
-            T = get_temperature();
-            sleep(5); // wait 5 secs, as we are dealing in minutes, corrected for by delay() function
-            t = time(0);   // get time now
-            now = localtime(&t);
-            sprintf(buff, "insert into tbl1 values('%.4d-%.2d-%.2dT%.2d:%.2d', %.2f)", now -> tm_year + 1900, 
-                    now -> tm_mon+1, now -> tm_mday, now -> tm_hour, now -> tm_min, T);            
-            //printf("Child: %s\n", buff);
-            db_write(buff);
+    *run_flg = 1;
+    while(1){
+        while(time_left(*delay_time) > 2){
+            sleep(1);
+            if(!*run_flg) break;
         }
-        _exit(0);
+        if(!*run_flg) break;
+        delay(*delay_time);
+        T = get_temperature();
+        t = time(0);   // get time now
+        now = localtime(&t);
+        sprintf(buff, "insert into tbl1 values('%.4d-%.2d-%.2dT%.2d:%.2d', %.2f)", now -> tm_year + 1900, 
+                now -> tm_mon+1, now -> tm_mday, now -> tm_hour, now -> tm_min, T);            
+        db_write(buff);
+        sleep(10); // wait 10 secs as we are dealing in minutes, corrected for by delay() function
     }
-    else{ // parent process
-        printf("Parent: I am here\n");
-        return;
-    }
+    // continue with child process
 }
 
 /*** reads temperature from probe and returns value *****/
-double get_temperature(void)
+double get_temperature()
 {
     int fd, i = 0;
     char str[256], *stp;
@@ -196,12 +195,12 @@ delay is altered to coincide with the turn of the hour.
 Note that the reading of the probe is slow, and that this
 is corrected here.
 *********************************************************/
-void delay()
+void delay(int dmins) // dtime is delay time
 {
     time_t t;
     struct tm *now;
     int secs, secs_left;
-    const int delay_mins = *delay_time;
+    const int delay_mins = dmins;
     
     t = time(NULL);
     now = localtime(&t);
@@ -212,18 +211,41 @@ void delay()
     sleep(secs);
 }
 
+// returns the seconds left until next target time 
+int time_left(int dmins) // dtime is delay time
+{
+    time_t t;
+    struct tm *now;
+    int secs, secs_left;
+    const int delay_mins = dmins;
+    
+    t = time(NULL);
+    now = localtime(&t);
+    // next line: removes the extra time which has been lost
+    secs = delay_mins * 60 - now -> tm_sec - 60 * (now -> tm_min % delay_mins);
+    secs_left = 3600 - 60 * now -> tm_min - now -> tm_sec; // seconds left in hour
+    if(secs_left < secs) secs = secs_left; 
+    return secs;
+}
+
 /*** function to set up shared memory ***/
 void* create_shared_memory(size_t size) 
 {
-  // Our memory buffer will be readable and writable:
-  int protection = PROT_READ | PROT_WRITE;
-  // The buffer will be shared (meaning other processes can access it), but
-  // anonymous (meaning third-party processes cannot obtain an address for it),
-  // so only this process and its children will be able to use it:
-  int visibility = MAP_ANONYMOUS | MAP_SHARED;
-  // The remaining parameters to `mmap()` are not important for this use case,
-  // but the manpage for `mmap` explains their purpose.
-  return mmap(NULL, size, protection, visibility, 0, 0);
+    void *vp;  
+
+    // Our memory buffer will be readable and writable:
+    int protection = PROT_READ | PROT_WRITE;
+    // The buffer will be shared (meaning other processes can access it), but
+    // anonymous (meaning third-party processes cannot obtain an address for it),
+    // so only this process and its children will be able to use it:
+    int visibility = MAP_ANONYMOUS | MAP_SHARED;
+    // The remaining parameters to `mmap()` are not important for this use case,
+    // but the manpage for `mmap` explains their purpose.
+    vp = mmap(NULL, size, protection, visibility, 0, 0);
+    if(vp == MAP_FAILED){
+        error("Error: virtual memory allocation failed");
+    }
+    return vp;
 }
 
 
@@ -238,12 +260,11 @@ void sock_talk(int sock, char mess[], char buffer[])
 {
     int n;
       
-    //bzero(buffer,256);
     n = read(sock, buffer, 255);
-    if (n < 0) error("ERROR reading from socket");
+    if (n < 0) error("Error: reading from socket");
     buffer[n] = '\0';
     n = write(sock, mess, strlen(mess));
-    if (n < 0) error("ERROR writing to socket");
+    if (n < 0) error("Error: writing to socket");
 }
 
 

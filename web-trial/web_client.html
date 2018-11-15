@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<body>
+   
+<h1>Temerature Reader</h1>
+<p id="mydata"></p>
+<button onclick="displayResult()">Update</button>
+   
+<script>
+    const url=document.location.origin + '?data';
+    
+    displayResult();
+    
+    function displayResult(){
+        fetch(url).then(function(response){
+            if(response.ok){
+                response.text().then(function(myText){
+                    str = myText;
+                    document.getElementById("mydata").innerHTML = myText;
+                });
+            }else{
+                console.log('Network request failed with response ' + response.status + ': ' + response.statusText);
+            }
+        });     
+    }
+
+</script>
+
+</body>
+</html>
+
+
+
+

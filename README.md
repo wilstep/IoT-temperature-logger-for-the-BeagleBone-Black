@@ -1,4 +1,4 @@
-# IOT-temperature-logger-for-the-BeagleBone-Black
+# IoT-temperature-logger-for-the-BeagleBone-Black
 
 See my blog post for full details: (https://swtinkering.blogspot.com/2018/11/internet-of-things-iot-temperature.html)
 

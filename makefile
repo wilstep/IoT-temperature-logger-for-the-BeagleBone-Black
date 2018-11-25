@@ -1,14 +1,12 @@
-all: server client
+all: wserver
 
-server: server.o db_read_write.o
-	gcc -o server server.o db_read_write.o -lsqlite3
+wserver: wserver.o db_read_write.o
+	gcc -o wserver wserver.o db_read_write.o -lsqlite3
 
-sever.o: server.c server.h
-	gcc -c server.c
+wsever.o: wserver.c wserver.h
+	gcc -c wserver.c
 
-db_read.o: db_read_write.c server.h
+db_read.o: db_read_write.c wserver.h
 	gcc -c db_read_write.c 
 
-client: client.c
-	gcc -o client client.c
 

@@ -1,3 +1,9 @@
+<!--
+   An IoT temperature logger in the internet domain using TCP and SQLite3
+   Stephen R. Williams, 8th Dec 2018
+   Open source GPLv3 as specified at repository
+-->
+
 <!DOCTYPE html>
 
 <html>
@@ -7,21 +13,69 @@
 <script src="https://momentjs.com/downloads/moment-with-locales.min.js"></script>
 <script src="https://momentjs.com/downloads/moment-timezone-with-data.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.7.3/Chart.min.js"></script>
+<link href="https://code.jquery.com/ui/1.11.4/themes/smoothness/jquery-ui.css" rel="stylesheet" type="text/css">
+<script src="https://code.jquery.com/jquery-1.12.4.js"></script>
+<script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+<script src="/graph.js"></script>
 </head>
 
+<style>
+body {
+    background-color: Beige;
+}
+
+h1 {
+    color: blue;
+    text-align: center;
+}
+
+#pickers {
+    font-family: verdana;
+    font-size: 16px;
+    color: DimGray;
+    background-color: PowderBlue;
+    padding: 5px;
+    margin-bottom: 8px;
+    margin-right: 8px;
+    border-style: double;
+}
+
+#mydata {
+    font-family: verdana;
+    font-size: 18px;
+}
+
+.pdate {
+    font-size: 16px;
+    color: DimGray;
+}
+
+</style>
 
 <body>
 
 <h1>Temperature Record</h1>
 <p id="mydata"></p>
-<p>A new data point is added every 30 minutes: push button to add new data!</p>
-<button onclick="displayResult()">Update time & temperature</button>
-<button onclick="updateData()">Update graph data</button>
+<p id="pickers">
+
+<label for="from">Enter the earliest date to appear in the graph: </label>
+<input type="text" id="from" name="from"><br>
+<label for="to">Enter the latest date to appear in the graph: &nbsp&nbsp </label>
+<input type="text" id="to" name="to"><br>
+</p>
+<div id="date_range" class="pdate"></div>
+<div class="pdate">
+Select a date range, press "Set date range" button, then press "Update graph data" and or download link</p>
+
+<button onclick="gdata.dateFunc()">Set date range</button>
+<button onclick="gdata.updateData()">Update graph data</button>
+<a id="down_load" href="graph.csv" download>Download Graph Data (graph.csv)</a>
+
+
+
 <br>   
 <br>
-<canvas id="myChart" width="400" height="250" aria-label="Hello ARIA World" role="img"></canvas>
-
-<script src="/graph.js"></script>
+<canvas id="myChart" width="400" height="200" aria-label="Hello ARIA World" role="img"></canvas>
 
 </body>
 </html>

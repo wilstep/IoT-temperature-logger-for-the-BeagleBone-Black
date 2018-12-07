@@ -1,8 +1,9 @@
 /* 
-   A simple HTTP server in the internet domain using TCP and SQLite3
-   The port number is passed as an argument 
-   Stephen R. Williams, 25th Nov 2018
+   An IoT temperature logger in the internet domain using TCP and SQLite3
+   Stephen R. Williams, 8th Dec 2018
+   Open source GPLv3 as specified at repository
 */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -162,10 +163,12 @@ void send_temperature(int sock)
     // set up buffer for later data transfer  
     t = time(NULL);
     now = localtime(&t);    
-    sprintf(buffer2, "The time is %.2d:%.2d:%.2d", now -> tm_hour, now -> tm_min, now -> tm_sec); 
+    sprintf(buffer2, "At %.2d:%.2d:%.2d", now -> tm_hour, now -> tm_min, now -> tm_sec); 
     n = strlen(buffer2);
     // next line calls get_temperature_reading() which gets temperature from probe
-    sprintf(buffer2 + n, ", and the temperature is %.1f degrees Celsius", get_temperature_reading());  
+    sprintf(buffer2 + n, ", the temperature was %.1f degrees Celsius", get_temperature_reading()); 
+    n = strlen(buffer2);
+    sprintf(buffer2 + n, " (Updated every 5mins)");  
     // Simple HTTP headers
     sprintf(buffer1, "HTTP/1.1 200 OK\nServer: C_BBB\nContent-Length: %lu", strlen(buffer2)); // This number: Bad!
     n = strlen(buffer1);
@@ -177,8 +180,9 @@ void send_temperature(int sock)
 }
 
 
-
-void file_serv(int sock, char fn[])
+// sends the file given by fn[] to the client
+// mime[] is MIME type
+void file_serv(int sock, char fn[], char mime[])
 {
     char buffer[512];
     int n, c, cnt;
@@ -195,7 +199,7 @@ void file_serv(int sock, char fn[])
     // Simple HTTP header
     sprintf(buffer, "HTTP/1.1 200 OK\r\nServer: C_BBB\r\nContent-Length: %d", n);
     n = strlen(buffer);
-    sprintf(buffer + n, "\r\nContent-Type: text/html; charset=utf-8\r\n\r\n");
+    sprintf(buffer + n, "\r\nContent-Type: %s; charset=utf-8\r\n\r\n", mime);
     n = write(sock, buffer, strlen(buffer)); // send header to client
     if(n < 0) error("ERROR writing to socket");
     cnt = 0;
@@ -227,33 +231,64 @@ void run_temp()
 // Only responds to specific request strings, makes more secure
 void run(int portno, int sockfd)
 {
-    char buffer[1024];
-    int n;
+    char *chstr, buffer[1024], dbbuff[256];
+    int n, m, n2;
       
     bzero(buffer, 1024);
     n = read(sockfd, buffer, 1023);  
-    if(n < 0) error("ERROR reading from socket");
-    if(strncmp(buffer, "GET / HTTP/1.1", 14) == 0){
-        file_serv(sockfd, "graph.html");
+    if(n < 0) error("ERROR reading from socket");    
+    if(n == 0) return;
+    //printf("%s\n", buffer);
+    if(strncmp(buffer, "GET /iott.html", 14) == 0){
+        file_serv(sockfd, "graph.html", "text/html");
         return;
     }    
     if(strncmp(buffer, "GET /favicon.ico", 16) == 0){
-        file_serv(sockfd, "favicon.ico");
+        file_serv(sockfd, "favicon.ico", "data:image/ico");
         return;
     }
     if(strncmp(buffer, "GET /graph.js", 13) == 0){
-        file_serv(sockfd, "graph.js");
+        file_serv(sockfd, "graph.js", "application/javascript");
+        return;
+    }
+    if(strncmp(buffer, "GET /source.zip", 15) == 0){
+        file_serv(sockfd, "source.zip", "application/octet-stream");
         return;
     }
     if(strncmp(buffer, "GET /data.json", 14) == 0){ 
         db_read_send_JSON(sockfd, "select * from tbl1");
         return;
     }
-    if(strncmp(buffer, "GET /?data", 10) == 0){
-        send_temperature(sockfd);
+    if(strncmp(buffer, "POST /data.json", 15) == 0){    // our buffer is big enough, 
+        chstr = strstr(buffer, "Content-Length:") + 16; // assume it never runs out
+        n = atoi(chstr); // content length
+        chstr = strstr(buffer, "\r\n\r\n") + 4; // this is where the data is
+        n2 = 0;
+        while((n2 += strlen(chstr)) < n){ // for iOS Safari, doesn't always read in 1 turn
+            m = read(sockfd, chstr + n2, 1023 - strlen(buffer));  
+            if(m < 0) error("ERROR reading from socket");   
+            //printf("length read: %d, %s\n", m, chstr);      
+        }
+        db_read_send_JSON(sockfd, chstr);
         return;
     }
-    printf("invalid request made: %s: ", buffer);
+    if(strncmp(buffer, "GET /range.json", 15) == 0){ 
+        db_read_send_range(sockfd);
+        return;
+    }
+    if(strncmp(buffer, "GET /graph.csv", 14) == 0){ // download graph.csv
+        chstr = strstr(buffer, "?") + 1;  // sends options after '?' at end of file name
+        chstr[16] = '\0'; // set end points for sub-strings which are time parameters
+        chstr[34] = '\0';
+        sprintf(dbbuff, "select * from tbl1 where time between '%s' and '%s'", chstr, chstr+17);
+        db_read_send_CSV(sockfd, dbbuff);
+        return;
+    }
+    if(strncmp(buffer, "GET /ttdata", 11) == 0){
+        send_temperature(sockfd);
+        return;
+    }    
+    printf("invalid request made:%s!", buffer);
 }
 
 
@@ -290,7 +325,7 @@ int main(int argc, char *argv[])
     // bind the socket to an address
     if(bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
         error("ERROR on binding");
-    listen(sockfd, 5);    // listen for connections
+    listen(sockfd, 15);    // listen for connections
     clilen = sizeof(cli_addr);
     while(1){
         newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen); // creates the new socket for the client 
